@@ -95,6 +95,7 @@ describe('Test proxy config', () => {
         };
 
         proxySAM = await generateProxySAM({
+          runtime: 'nodejs14.x',
           pathToProxyPackage,
           proxyConfig: JSON.stringify(proxyConfig),
           onData(data) {
