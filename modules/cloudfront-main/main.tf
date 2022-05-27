@@ -3,7 +3,9 @@ resource "aws_cloudfront_distribution" "distribution" {
   is_ipv6_enabled     = true
   comment             = "${var.deployment_name} - Main"
   price_class         = var.cloudfront_price_class
+  aliases             = var.cloudfront_aliases
   default_root_object = var.cloudfront_default_root_object
+  web_acl_id          = var.cloudfront_webacl_id
 
   # Add CloudFront origins
   dynamic "origin" {
@@ -68,8 +70,9 @@ resource "aws_cloudfront_distribution" "distribution" {
       viewer_protocol_policy = default_cache_behavior.value["viewer_protocol_policy"]
       compress               = default_cache_behavior.value["compress"]
 
-      origin_request_policy_id = default_cache_behavior.value["origin_request_policy_id"]
-      cache_policy_id          = default_cache_behavior.value["cache_policy_id"]
+      origin_request_policy_id   = default_cache_behavior.value["origin_request_policy_id"]
+      response_headers_policy_id = default_cache_behavior.value["response_headers_policy_id"]
+      cache_policy_id            = default_cache_behavior.value["cache_policy_id"]
 
       dynamic "lambda_function_association" {
         for_each = [default_cache_behavior.value["lambda_function_association"]]
@@ -115,7 +118,10 @@ resource "aws_cloudfront_distribution" "distribution" {
   }
 
   viewer_certificate {
-    cloudfront_default_certificate = true
+    cloudfront_default_certificate = var.cloudfront_acm_certificate_arn == null
+    acm_certificate_arn            = var.cloudfront_acm_certificate_arn
+    minimum_protocol_version       = var.cloudfront_minimum_protocol_version
+    ssl_support_method             = var.cloudfront_acm_certificate_arn != null ? "sni-only" : null
   }
 
   restrictions {

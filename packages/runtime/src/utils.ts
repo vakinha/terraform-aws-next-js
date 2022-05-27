@@ -420,7 +420,8 @@ export async function getDynamicRoutes(
             };
           });
       }
-      case 3: {
+      case 3:
+      case 4: {
         return routesManifest.dynamicRoutes
           .filter(({ page }) =>
             omittedRoutes ? !omittedRoutes.has(page) : true
@@ -521,6 +522,10 @@ type ImagesManifest = {
     loader: LoaderKey;
     sizes: number[];
     domains: string[];
+    formats?: string[] | undefined;
+    minimumCacheTTL?: number | undefined;
+    dangerouslyAllowSVG?: boolean | undefined;
+    contentSecurityPolicy?: string | undefined;
   };
 };
 

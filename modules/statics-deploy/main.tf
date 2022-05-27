@@ -8,15 +8,15 @@ locals {
 ########################
 
 resource "aws_s3_bucket" "static_upload" {
-  bucket_prefix = "next-tf-deploy-source"
-  acl           = "private"
+  bucket_prefix = "${var.deployment_name}-tfn-deploy"
   force_destroy = true
-  tags          = var.tags
 
-  # We are using versioning here to ensure that no file gets overridden at upload
-  versioning {
-    enabled = true
-  }
+  tags = merge(var.tags, var.tags_s3_bucket)
+}
+
+resource "aws_s3_bucket_acl" "static_upload" {
+  bucket = aws_s3_bucket.static_upload.id
+  acl    = "private"
 }
 
 resource "aws_s3_bucket_notification" "on_create" {
@@ -33,27 +33,18 @@ resource "aws_s3_bucket_notification" "on_create" {
 #########################
 
 resource "aws_s3_bucket" "static_deploy" {
-  bucket_prefix = "next-tf-static-deploy"
-  acl           = "private"
+  bucket_prefix = "${var.deployment_name}-tfn-static"
   force_destroy = true
-  tags          = var.tags
 
-  lifecycle_rule {
-    id      = "Expire static assets"
-    enabled = var.expire_static_assets >= 0 # -1 disables the cleanup
+  tags = merge(var.tags, var.tags_s3_bucket)
+}
 
-    tags = {
-      "tfnextExpire" = "true"
-    }
-
-    expiration {
-      days = var.expire_static_assets > 0 ? var.expire_static_assets : 0
-    }
-  }
+resource "aws_s3_bucket_acl" "static_deploy" {
+  bucket = aws_s3_bucket.static_deploy.id
+  acl    = "private"
 }
 
 # CloudFront permissions for the bucket
-
 resource "aws_cloudfront_origin_access_identity" "this" {
   comment = "S3 CloudFront access ${aws_s3_bucket.static_deploy.id}"
 }
@@ -120,6 +111,48 @@ data "aws_iam_policy_document" "access_static_deploy" {
     ]
     resources = [var.cloudfront_arn]
   }
+
+  # Permissions for CloudFormation to create resources
+  statement {
+    actions = [
+      "apigateway:*",
+      "cloudformation:CreateStack",
+      "iam:CreateRole",
+      "iam:DeleteRole",
+      "iam:DeleteRolePolicy",
+      "iam:GetRole",
+      "iam:GetRolePolicy",
+      "iam:PassRole",
+      "iam:PutRolePolicy",
+      "iam:TagRole",
+      "iam:UntagRole",
+      "lambda:AddPermission",
+      "lambda:CreateFunction",
+      "lambda:DeleteFunction",
+      "lambda:CreateFunctionUrlConfig",
+      "lambda:GetFunctionUrlConfig",
+      "lambda:GetFunction",
+      "lambda:RemovePermission",
+      "lambda:TagResource",
+      "lambda:UntagResource",
+      "logs:CreateLogGroup",
+      "logs:DeleteLogGroup",
+      "logs:DeleteRetentionPolicy",
+      "logs:PutRetentionPolicy",
+      "logs:TagLogGroup",
+      "logs:UntagLogGroup",
+    ]
+    resources = ["*"]
+  }
+
+  # Allow CloudFormation to publish status changes to the SNS queue
+  statement {
+    effect = "Allow"
+    actions = [
+      "sns:Publish"
+    ]
+    resources = [var.deploy_status_sns_topic_arn]
+  }
 }
 
 #
@@ -134,6 +167,19 @@ data "aws_iam_policy_document" "access_static_upload" {
       "s3:DeleteObjectVersion"
     ]
     resources = ["${aws_s3_bucket.static_upload.arn}/*"]
+  }
+}
+
+# Access the dynamoDB deployment table
+data "aws_iam_policy_document" "access_dynamodb_table_deployments" {
+  statement {
+    effect = "Allow"
+    actions = [
+      "dynamodb:Query",
+      "dynamodb:PutItem",
+      "dynamodb:UpdateItem"
+    ]
+    resources = [var.dynamodb_table_deployments_arn]
   }
 }
 
@@ -158,26 +204,22 @@ data "aws_iam_policy_document" "access_sqs_queue" {
 }
 
 module "lambda_content" {
-  source  = "dealmore/download/npm"
-  version = "1.0.0"
+  source  = "milliHQ/download/npm"
+  version = "2.1.0"
 
-  module_name    = "@dealmore/terraform-next-deploy-trigger"
+  module_name    = "@millihq/terraform-next-deploy-trigger"
   module_version = var.deploy_trigger_module_version
   path_to_file   = "dist.zip"
   use_local      = var.debug_use_local_packages
-}
-
-resource "random_id" "function_name" {
-  prefix      = "next-tf-deploy-"
-  byte_length = 4
+  local_cwd      = var.tf_next_module_root
 }
 
 module "deploy_trigger" {
   source  = "terraform-aws-modules/lambda/aws"
-  version = "2.4.0"
+  version = "3.1.0"
 
-  function_name             = random_id.function_name.hex
-  description               = "Managed by Terraform-next.js"
+  function_name             = "${var.deployment_name}_tfn-deploy"
+  description               = "Managed by Terraform Next.js"
   handler                   = "handler.handler"
   runtime                   = "nodejs14.x"
   memory_size               = 1024
@@ -187,7 +229,7 @@ module "deploy_trigger" {
   role_permissions_boundary = var.lambda_role_permissions_boundary
 
   create_package         = false
-  local_existing_package = module.lambda_content.abs_path
+  local_existing_package = module.lambda_content.rel_path
 
   # Prevent running concurrently
   reserved_concurrent_executions = 1
@@ -206,19 +248,22 @@ module "deploy_trigger" {
   }
 
   attach_policy_jsons    = true
-  number_of_policy_jsons = 3
+  number_of_policy_jsons = 4
   policy_jsons = [
     data.aws_iam_policy_document.access_static_deploy.json,
     data.aws_iam_policy_document.access_static_upload.json,
-    data.aws_iam_policy_document.access_sqs_queue.json
+    data.aws_iam_policy_document.access_sqs_queue.json,
+    data.aws_iam_policy_document.access_dynamodb_table_deployments.json
   ]
 
   environment_variables = {
-    NODE_ENV          = "production"
-    TARGET_BUCKET     = aws_s3_bucket.static_deploy.id
-    EXPIRE_AFTER_DAYS = var.expire_static_assets >= 0 ? var.expire_static_assets : "never"
-    DISTRIBUTION_ID   = var.cloudfront_id
-    SQS_QUEUE_URL     = aws_sqs_queue.this.id
+    NODE_ENV               = "production"
+    TARGET_BUCKET          = aws_s3_bucket.static_deploy.id
+    DISTRIBUTION_ID        = var.cloudfront_id
+    SQS_QUEUE_URL          = aws_sqs_queue.this.id
+    DEPLOY_STATUS_SNS_ARN  = var.deploy_status_sns_topic_arn
+    TABLE_REGION           = var.dynamodb_region
+    TABLE_NAME_DEPLOYMENTS = var.dynamodb_table_deployments_name
   }
 
   event_source_mapping = {
@@ -227,43 +272,6 @@ module "deploy_trigger" {
       event_source_arn = aws_sqs_queue.this.arn
     }
   }
-}
-
-###########################
-# Upload static files to s3
-###########################
-
-resource "null_resource" "static_s3_upload_awscli" {
-  count = var.use_awscli_for_static_upload ? 1 : 0
-  triggers = {
-    static_files_archive = filemd5(var.static_files_archive)
-  }
-
-  provisioner "local-exec" {
-    command = "aws s3 cp --region ${aws_s3_bucket.static_upload.region} ${abspath(var.static_files_archive)} s3://${aws_s3_bucket.static_upload.id}/${basename(var.static_files_archive)}"
-  }
-
-  # Make sure this only runs when the bucket and the lambda trigger are setup
-  depends_on = [
-    aws_s3_bucket_notification.on_create
-  ]
-}
-
-resource "null_resource" "static_s3_upload" {
-  count = var.use_awscli_for_static_upload ? 0 : 1
-  triggers = {
-    static_files_archive = filemd5(var.static_files_archive)
-  }
-
-  provisioner "local-exec" {
-    command     = "./s3-put -r ${aws_s3_bucket.static_upload.region} -T ${abspath(var.static_files_archive)} /${aws_s3_bucket.static_upload.id}/${basename(var.static_files_archive)}"
-    working_dir = "${path.module}/s3-bash4/bin"
-  }
-
-  # Make sure this only runs when the bucket and the lambda trigger are setup
-  depends_on = [
-    aws_s3_bucket_notification.on_create
-  ]
 }
 
 ################################

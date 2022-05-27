@@ -1,8 +1,18 @@
 import { URL, URLSearchParams } from 'url';
 import { Route, isHandler, HandleValue } from '@vercel/routing-utils';
 
+import { fetchFileSystem } from './actions/fetch-file-system';
 import isURL from './util/is-url';
-import { RouteResult, HTTPHeaders } from './types';
+import { resolveRouteParameters } from './util/resolve-route-parameters';
+import { TTLCache } from './util/ttl-cache';
+import { RouteResult, HTTPHeaders, FileSystemEntry } from './types';
+import { ETagCache } from './util/etag-cache';
+
+type NodeFetch = typeof import('node-fetch').default;
+
+/* -----------------------------------------------------------------------------
+ * Utils
+ * ---------------------------------------------------------------------------*/
 
 // Since we have no replacement for url.parse, thanks Node.js
 // https://github.com/nodejs/node/issues/12682
@@ -32,47 +42,93 @@ function appendURLSearchParams(
   return param1;
 }
 
-/**
- *
- * @param str
- * @param match
- * @param keys
- */
-function resolveRouteParameters(
-  str: string,
-  match: string[],
-  keys: string[]
-): string {
-  return str.replace(/\$([1-9a-zA-Z]+)/g, (_, param) => {
-    let matchIndex: number = keys.indexOf(param);
-    if (matchIndex === -1) {
-      // It's a number match, not a named capture
-      matchIndex = parseInt(param, 10);
-    } else {
-      // For named captures, add one to the `keys` index to
-      // match up with the RegExp group matches
-      matchIndex++;
-    }
-    return match[matchIndex] || '';
-  });
-}
+/* -----------------------------------------------------------------------------
+ * Proxy
+ * ---------------------------------------------------------------------------*/
 
 export class Proxy {
-  routes: Route[];
-  lambdaRoutes: Set<string>;
-  staticRoutes: Set<string>;
+  filesystemCache: TTLCache<FileSystemEntry>;
+  routeCache: ETagCache<RouteResult>;
+  fetch: NodeFetch;
 
-  constructor(routes: Route[], lambdaRoutes: string[], staticRoutes: string[]) {
-    this.routes = routes;
-    this.lambdaRoutes = new Set<string>(lambdaRoutes);
-    this.staticRoutes = new Set<string>(staticRoutes);
+  constructor(fetch: NodeFetch) {
+    this.fetch = fetch;
+
+    // TTL for filesystem is 0 since TTL is determined by the cache-control
+    // of the file.
+    this.filesystemCache = new TTLCache(0);
+    this.routeCache = new ETagCache();
   }
 
-  _checkFileSystem = (path: string) => {
-    return this.staticRoutes.has(path);
-  };
+  /**
+   * Checks if the requested path matches a static file from the filesystem
+   *
+   * @param requestedFilePath - Path to the potential file. Could include a
+   *    querystring.
+   * @returns Absolute path to the file that is matched, otherwise null
+   */
+  async checkFileSystem(
+    deploymentId: string,
+    fileSystemEndpointUrl: string,
+    requestedFilePathWithPossibleQuerystring: string
+  ): Promise<string | null> {
+    // Make sure the querystring is removed from the requested file before
+    // doing the lookup
+    const querystringStartPos =
+      requestedFilePathWithPossibleQuerystring.indexOf('?');
+    const requestedFilePath =
+      querystringStartPos === -1
+        ? requestedFilePathWithPossibleQuerystring
+        : requestedFilePathWithPossibleQuerystring.substring(
+            0,
+            querystringStartPos
+          );
 
-  route(reqUrl: string) {
+    // If the last character is a `/` (invalid S3 key), change it to `/index`
+    let requestedFilePathWithoutTrailingSlash = requestedFilePath;
+    if (requestedFilePath.charAt(requestedFilePath.length - 1) === '/') {
+      requestedFilePathWithoutTrailingSlash = requestedFilePath + 'index';
+    }
+
+    // If the first character is a `/` (invalid S3 key), remove it
+    let s3Key = requestedFilePathWithoutTrailingSlash;
+    if (s3Key.charAt(0) === '/') {
+      s3Key = s3Key.substring(1);
+    }
+
+    try {
+      const file = await fetchFileSystem(
+        this.fetch,
+        this.filesystemCache,
+        fileSystemEndpointUrl,
+        deploymentId,
+        s3Key
+      );
+
+      if (file) {
+        return requestedFilePathWithoutTrailingSlash;
+      }
+    } catch (error) {
+      console.error(
+        'Unhandled error while checking fileSystem for route: ' +
+          requestedFilePathWithoutTrailingSlash
+      );
+      console.error(error);
+
+      return null;
+    }
+
+    // requestedFilePath does not match a key in S3
+    return null;
+  }
+
+  async route(
+    deploymentId: string,
+    routes: Route[],
+    lambdaRoutes: Record<string, string>,
+    fileSystemEndpointUrl: string,
+    reqUrl: string
+  ) {
     const parsedUrl = parseUrl(reqUrl);
     let { searchParams, pathname: reqPathname = '/' } = parsedUrl;
     let result: RouteResult | undefined;
@@ -82,7 +138,23 @@ export class Proxy {
     let combinedHeaders: HTTPHeaders = {};
     let target: undefined | 'filesystem' | 'lambda';
 
-    for (let routeIndex = 0; routeIndex < this.routes.length; routeIndex++) {
+    /**
+     * Set the route result target as filesystem
+     */
+    function setTargetFilesystem(dest: string) {
+      result = {
+        found: true,
+        target: 'filesystem',
+        dest,
+        headers: combinedHeaders,
+        continue: false,
+        isDestUrl: false,
+        status,
+        phase,
+      };
+    }
+
+    for (let routeIndex = 0; routeIndex < routes.length; routeIndex++) {
       /**
        * This is how the routing basically works:
        * (For reference see: https://vercel.com/docs/configuration#routes)
@@ -94,7 +166,7 @@ export class Proxy {
        *
        */
 
-      const routeConfig = this.routes[routeIndex];
+      const routeConfig = routes[routeIndex];
 
       //////////////////////////////////////////////////////////////////////////
       // Phase 1: Check for handler
@@ -104,20 +176,15 @@ export class Proxy {
         // Check if the path is a static file that should be served from the
         // filesystem
         if (routeConfig.handle === 'filesystem') {
-          // Remove tailing `/` for filesystem check
-          const filePath = reqPathname.replace(/\/+$/, '');
+          const filePath = await this.checkFileSystem(
+            deploymentId,
+            fileSystemEndpointUrl,
+            reqPathname
+          );
 
           // Check if the route matches a route from the filesystem
-          if (this._checkFileSystem(filePath)) {
-            result = {
-              found: true,
-              target: 'filesystem',
-              dest: reqPathname,
-              headers: combinedHeaders,
-              continue: false,
-              isDestUrl: false,
-              status,
-            };
+          if (filePath !== null) {
+            setTargetFilesystem(filePath);
             break;
           }
         }
@@ -198,26 +265,30 @@ export class Proxy {
         }
 
         if (routeConfig.check && phase !== 'hit') {
-          if (this.lambdaRoutes.has(destPath)) {
+          if (destPath in lambdaRoutes) {
             target = 'lambda';
           } else {
+            // Check if the path matches a route from the filesystem
+            const filePath = await this.checkFileSystem(
+              deploymentId,
+              fileSystemEndpointUrl,
+              destPath
+            );
+            if (filePath !== null) {
+              setTargetFilesystem(filePath);
+              break;
+            }
+
             // When it is not a lambda route we cut the url_args
             // for the next iteration
             const nextUrl = parseUrl(destPath);
             reqPathname = nextUrl.pathname!;
-
-            // Check if we have a static route
-            // Convert to filePath first, since routes with tailing `/` are
-            // stored as `/index` in filesystem
-            const filePath = reqPathname.replace(/\/$/, '/index');
-            if (!this.staticRoutes.has(filePath)) {
-              appendURLSearchParams(searchParams, nextUrl.searchParams);
-              continue;
-            }
+            appendURLSearchParams(searchParams, nextUrl.searchParams);
+            continue;
           }
         }
 
-        if (!destPath.startsWith('/')) {
+        if (destPath.charAt(0) !== '/') {
           destPath = `/${destPath}`;
         }
 

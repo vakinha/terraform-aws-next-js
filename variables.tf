@@ -1,11 +1,6 @@
-##########
-# Settings
-##########
-variable "next_tf_dir" {
-  description = "Relative path to the .next-tf dir."
-  type        = string
-  default     = "./.next-tf"
-}
+####################
+# Image Optimization
+####################
 
 variable "create_image_optimization" {
   description = "Controls whether resources for image optimization support should be created or not."
@@ -19,49 +14,36 @@ variable "image_optimization_lambda_memory_size" {
   default     = 2048
 }
 
-variable "expire_static_assets" {
-  description = "Number of days after which static assets from previous deployments should be removed from S3. Set to -1 to disable expiration."
-  type        = number
-  default     = 30
-}
+######################
+# Multiple deployments
+######################
 
-variable "use_awscli_for_static_upload" {
-  description = "Use AWS CLI when uploading static resources to S3 instead of default Bash script. Some cases may fail with 403 Forbidden when using the Bash script."
+variable "enable_multiple_deployments" {
+  description = "Controls whether it should be possible to run multiple deployments in parallel (requires multiple_deployments_base_domain)."
   type        = bool
   default     = false
+}
+
+variable "multiple_deployments_base_domain" {
+  description = "Default wildcard domain where new deployments should be available. Should be in the form of *.example.com."
+  type        = string
+  default     = null
 }
 
 ###################
 # Lambdas (Next.js)
 ###################
-variable "lambda_environment_variables" {
-  type        = map(string)
-  description = "Map that defines environment variables for the Lambda Functions in Next.js."
-  default     = {}
-}
-
-variable "lambda_runtime" {
-  description = "Lambda Function runtime"
-  type        = string
-  default     = "nodejs14.x"
-}
-
-variable "lambda_memory_size" {
-  description = "Amount of memory in MB a Lambda Function can use at runtime. Valid value between 128 MB to 10,240 MB, in 1 MB increments."
-  type        = number
-  default     = 1024
-}
-
-variable "lambda_timeout" {
-  description = "Max amount of time a Lambda Function has to return a response in seconds. Should not be more than 30 (Limited by API Gateway)."
-  type        = number
-  default     = 10
-}
 
 variable "lambda_policy_json" {
   description = "Additional policy document as JSON to attach to the Lambda Function role"
   type        = string
   default     = null
+}
+
+variable "lambda_attach_policy_json" {
+  description = "Whether to deploy additional lambda JSON policies. If false, lambda_policy_json will not be attached to the lambda function. (Necessary since policy strings are only known after apply when using Terraforms data.aws_iam_policy_document)"
+  type        = bool
+  default     = false
 }
 
 variable "lambda_role_permissions_boundary" {
@@ -104,10 +86,34 @@ variable "cloudfront_price_class" {
   default     = "PriceClass_100"
 }
 
-variable "cloudfront_origin_headers" {
-  description = "Header keys that should be sent to the S3 or Lambda origins. Should not contain any header that is defined via cloudfront_cache_key_headers."
+variable "cloudfront_aliases" {
+  description = "Aliases for custom_domain"
   type        = list(string)
   default     = []
+}
+
+variable "cloudfront_acm_certificate_arn" {
+  description = "ACM certificate arn for custom_domain"
+  type        = string
+  default     = null
+}
+
+variable "cloudfront_minimum_protocol_version" {
+  description = "The minimum version of the SSL protocol that you want CloudFront to use for HTTPS connections. One of SSLv3, TLSv1, TLSv1_2016, TLSv1.1_2016, TLSv1.2_2018 or TLSv1.2_2019."
+  type        = string
+  default     = "TLSv1"
+}
+
+variable "cloudfront_origin_request_policy" {
+  description = "Id of a custom request policy that overrides the default policy (AllViewer). Can be custom or managed."
+  type        = string
+  default     = null
+}
+
+variable "cloudfront_response_headers_policy" {
+  description = "Id of a response headers policy. Can be custom or managed. Default is empty."
+  type        = string
+  default     = null
 }
 
 variable "cloudfront_cache_key_headers" {
@@ -128,17 +134,34 @@ variable "cloudfront_external_arn" {
   default     = null
 }
 
+variable "cloudfront_webacl_id" {
+  description = "An optional webacl2 arn or webacl id to associate with the cloudfront distribution"
+  type        = string
+  default     = null
+}
+
 ##########
 # Labeling
 ##########
 variable "deployment_name" {
-  description = "Identifier for the deployment group (alphanumeric characters, underscores, hyphens, slashes, hash signs and dots are allowed)."
+  description = "Identifier for the deployment group (only lowercase alphanumeric characters and hyphens are allowed)."
   type        = string
   default     = "tf-next"
+
+  validation {
+    condition     = can(regex("[a-z0-9-]+", var.deployment_name))
+    error_message = "Only lowercase alphanumeric characters and hyphens allowed."
+  }
 }
 
 variable "tags" {
   description = "Tag metadata to label AWS resources that support tags."
+  type        = map(string)
+  default     = {}
+}
+
+variable "tags_s3_bucket" {
+  description = "Tag metadata to label AWS S3 buckets. Overrides tags with the same name in input variable tags."
   type        = map(string)
   default     = {}
 }

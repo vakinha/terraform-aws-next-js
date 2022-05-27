@@ -1,8 +1,8 @@
-import { S3 } from 'aws-sdk';
+import S3 from 'aws-sdk/clients/s3';
 
 import { manifestVersion } from './constants';
 import { FileResult, Manifest, ManifestFile } from './types';
-import { generateRandomBuildId } from './utils';
+import { generateRandomBuildId } from './utils/random-id';
 
 async function getAllObjectsFromBucket(
   s3: S3,

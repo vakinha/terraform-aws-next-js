@@ -1,5 +1,15 @@
-output "static_upload_bucket_id" {
-  value = module.statics_deploy.static_upload_bucket_id
+output "upload_bucket_id" {
+  value = module.statics_deploy.upload_bucket_id
+}
+
+output "api_endpoint" {
+  description = "API endpoint that is used by the CLI."
+  value       = module.api.api_endpoint
+}
+
+output "api_endpoint_access_policy_arn" {
+  description = "ARN of the policy that grants access to the API endpoint."
+  value       = module.api.api_endpoint_access_policy_arn
 }
 
 ##################################

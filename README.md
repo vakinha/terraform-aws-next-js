@@ -1,6 +1,9 @@
 # Terraform Next.js module for AWS
 
-![CI status](https://github.com/dealmore/terraform-aws-next-js/workflows/CI/badge.svg)
+![CI status](https://github.com/milliHQ/terraform-aws-next-js/workflows/CI/badge.svg)
+
+> **Note:** The main branch currently contains the atomic deployments alpha preview.  
+> For the lastest stable release, please see the [`v0.x` branch](https://github.com/milliHQ/terraform-aws-next-js/tree/v0.x).
 
 A zero-config Terraform module for self-hosting Next.js sites serverless on AWS Lambda.
 
@@ -8,20 +11,21 @@ A zero-config Terraform module for self-hosting Next.js sites serverless on AWS 
 
 Some features are still under development, here is a list of features that are currently supported and what we plan to bring with the next releases:
 
-- ✅ &nbsp;Next.js `v9.5+` & `v10+` _(older Versions might work but are not actively supported)_
-- ✅ &nbsp;Terraform `v0.13+`
+- ✅ &nbsp;Supports any version of [Next.js](https://nextjs.org/)
+- ✅ &nbsp;[Terraform](https://www.terraform.io/) `v0.15+`
+- ✅ &nbsp;Unlimited parallel deployments of Next.js apps (atomic deployments)
 - ✅ &nbsp;Static, SSG, Lambda and API pages (with [dynamic routes](https://nextjs.org/docs/routing/dynamic-routes))
 - ✅ &nbsp;Automatic expiration of old static assets
 - ✅ &nbsp;[Rewrites](https://nextjs.org/docs/api-reference/next.config.js/rewrites) & [Redirects](https://nextjs.org/docs/api-reference/next.config.js/redirects)
 - ✅ &nbsp;[Image Component & Image Optimization](https://nextjs.org/docs/basic-features/image-optimization) support
 - 🚧 &nbsp;[Incremental Static Regeneration](https://nextjs.org/docs/basic-features/data-fetching#incremental-static-regeneration)
-- 🚧 &nbsp;[AWS CodeDeploy](https://aws.amazon.com/codedeploy/)
+- ⛔️&nbsp; [Middleware](https://nextjs.org/docs/advanced-features/middleware) (Not supported by Lambda@Edge / CloudFront functions)
 
 ## Architecture
 
 The Next.js Terraform module is designed as a full stack AWS app. It relies on multiple AWS services and connects them to work as a single application:
 
-![Architecture overview diagram](https://github.com/dealmore/terraform-aws-next-js/blob/main/docs/assets/architecture.png?raw=true)
+![Architecture overview diagram](https://github.com/milliHQ/terraform-aws-next-js/blob/main/docs/assets/architecture.png?raw=true)
 
 - **`I.` CloudFront**
 
@@ -49,7 +53,7 @@ The Next.js Terraform module is designed as a full stack AWS app. It relies on m
 - **Terraform Next.js Image Optimization**
 
   The [image optimization](https://nextjs.org/docs/basic-features/image-optimization) is triggered by routes with the prefix `/_next/image/*`.
-  It is a serverless task provided by our [Terraform Next.js Image Optimization module for AWS](https://registry.terraform.io/modules/dealmore/next-js-image-optimization/aws).
+  It is a serverless task provided by our [Terraform Next.js Image Optimization module for AWS](https://registry.terraform.io/modules/milliHQ/next-js-image-optimization/aws).
 
 - **Static Content Deployment**
 
@@ -57,7 +61,6 @@ The Next.js Terraform module is designed as a full stack AWS app. It relies on m
   It consists of a dedicated S3 bucket and a single Lambda function.
   The bucket is only used by Terraform to upload the static content from the `tf-next build` command as a zip archive.
   The upload then triggers the Lambda which unzips the content and deploys it to the static content S3 bucket ([`II`](#II-s3-static-content)).
-  Static assets from previous deployments are then marked to be expired in a certain amount of days (default 30, configurable via `expire_static_assets` variable).
   After the successful deployment a CloudFront [invalidation](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/Invalidation.html) is created to propagate the route changes to every edge location.
 
 - **Proxy Config Distribution**
@@ -114,7 +117,7 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 3.0"
+      version = "~> 4.0"
     }
   }
 }
@@ -133,7 +136,7 @@ provider "aws" {
 }
 
 module "tf_next" {
-  source = "dealmore/next-js/aws"
+  source = "milliHQ/next-js/aws"
 
   providers = {
     aws.global_region = aws.global_region
@@ -182,15 +185,15 @@ You can create a `.terraformignore` in the root of your project and add the foll
 
 ## Examples
 
-- [Complete](https://github.com/dealmore/terraform-aws-next-js/blob/main/examples/complete)  
+- [Complete](https://github.com/milliHQ/terraform-aws-next-js/tree/main/examples/complete)  
   Complete example with SSR, API and static pages.
-- [Static](https://github.com/dealmore/terraform-aws-next-js/blob/main/examples/static)  
+- [Static](https://github.com/milliHQ/terraform-aws-next-js/tree/main/examples/static)  
   Example that uses static pages only (No SSR).
-- [Next Image](https://github.com/dealmore/terraform-aws-next-js/blob/main/examples/next-image)  
+- [Next Image](https://github.com/milliHQ/terraform-aws-next-js/tree/main/examples/next-image)  
   Images are optimized on the fly by AWS Lambda.
-- [Existing CloudFront](https://github.com/dealmore/terraform-aws-next-js/blob/main/examples/with-existing-cloudfront)  
+- [Existing CloudFront](https://github.com/milliHQ/terraform-aws-next-js/tree/main/examples/with-existing-cloudfront)  
   Use the module together with an existing CloudFront distribution that can be fully customized.
-- [Custom Domain](https://github.com/dealmore/terraform-aws-next-js/blob/main/examples/with-custom-domain)  
+- [Custom Domain](https://github.com/milliHQ/terraform-aws-next-js/tree/main/examples/with-custom-domain)  
   Use the module with your own domain from Route 53.
 
 <!-- prettier-ignore-start -->
@@ -199,42 +202,42 @@ You can create a `.terraformignore` in the root of your project and add the foll
 
 | Name | Version |
 |------|---------|
-| terraform | >= 0.13 |
-| aws | >= 3.43.0 |
-| random | >= 2.3.0 |
+| terraform | >= 0.15 |
+| aws | >= 4.8 |
 
 ## Providers
 
 | Name | Version |
 |------|---------|
-| aws | >= 3.43.0 |
-| random | >= 2.3.0 |
+| aws | >= 4.8 |
 
 ## Inputs
 
 | Name | Description | Type | Default | Required |
 |------|-------------|------|---------|:--------:|
+| cloudfront\_acm\_certificate\_arn | ACM certificate arn for custom\_domain | `string` | `null` | no |
+| cloudfront\_aliases | Aliases for custom\_domain | `list(string)` | `[]` | no |
 | cloudfront\_cache\_key\_headers | Header keys that should be used to calculate the cache key in CloudFront. | `list(string)` | <pre>[<br>  "Authorization"<br>]</pre> | no |
 | cloudfront\_create\_distribution | Controls whether the main CloudFront distribution should be created. | `bool` | `true` | no |
 | cloudfront\_external\_arn | When using an external CloudFront distribution provide its arn. | `string` | `null` | no |
 | cloudfront\_external\_id | When using an external CloudFront distribution provide its id. | `string` | `null` | no |
-| cloudfront\_origin\_headers | Header keys that should be sent to the S3 or Lambda origins. Should not contain any header that is defined via cloudfront\_cache\_key\_headers. | `list(string)` | `[]` | no |
+| cloudfront\_minimum\_protocol\_version | The minimum version of the SSL protocol that you want CloudFront to use for HTTPS connections. One of SSLv3, TLSv1, TLSv1\_2016, TLSv1.1\_2016, TLSv1.2\_2018 or TLSv1.2\_2019. | `string` | `"TLSv1"` | no |
+| cloudfront\_origin\_request\_policy | Id of a custom request policy that overrides the default policy (AllViewer). Can be custom or managed. | `string` | `null` | no |
 | cloudfront\_price\_class | Price class for the CloudFront distributions (main & proxy config). One of PriceClass\_All, PriceClass\_200, PriceClass\_100. | `string` | `"PriceClass_100"` | no |
+| cloudfront\_response\_headers\_policy | Id of a response headers policy. Can be custom or managed. Default is empty. | `string` | `null` | no |
+| cloudfront\_webacl\_id | An optional webacl2 arn or webacl id to associate with the cloudfront distribution | `string` | `null` | no |
 | create\_image\_optimization | Controls whether resources for image optimization support should be created or not. | `bool` | `true` | no |
 | debug\_use\_local\_packages | Use locally built packages rather than download them from npm. | `bool` | `false` | no |
-| deployment\_name | Identifier for the deployment group (alphanumeric characters, underscores, hyphens, slashes, hash signs and dots are allowed). | `string` | `"tf-next"` | no |
-| expire\_static\_assets | Number of days after which static assets from previous deployments should be removed from S3. Set to -1 to disable expiration. | `number` | `30` | no |
+| deployment\_name | Identifier for the deployment group (only lowercase alphanumeric characters and hyphens are allowed). | `string` | `"tf-next"` | no |
+| enable\_multiple\_deployments | Controls whether it should be possible to run multiple deployments in parallel (requires multiple\_deployments\_base\_domain). | `bool` | `false` | no |
 | image\_optimization\_lambda\_memory\_size | Amount of memory in MB the worker Lambda Function for image optimization can use. Valid value between 128 MB to 10,240 MB, in 1 MB increments. | `number` | `2048` | no |
+| lambda\_attach\_policy\_json | Whether to deploy additional lambda JSON policies. If false, lambda\_policy\_json will not be attached to the lambda function. (Necessary since policy strings are only known after apply when using Terraforms data.aws\_iam\_policy\_document) | `bool` | `false` | no |
 | lambda\_attach\_to\_vpc | Set to true if the Lambda functions should be attached to a VPC. Use this setting if VPC resources should be accessed by the Lambda functions. When setting this to true, use vpc\_security\_group\_ids and vpc\_subnet\_ids to specify the VPC networking. Note that attaching to a VPC would introduce a delay on to cold starts | `bool` | `false` | no |
-| lambda\_environment\_variables | Map that defines environment variables for the Lambda Functions in Next.js. | `map(string)` | `{}` | no |
-| lambda\_memory\_size | Amount of memory in MB a Lambda Function can use at runtime. Valid value between 128 MB to 10,240 MB, in 1 MB increments. | `number` | `1024` | no |
 | lambda\_policy\_json | Additional policy document as JSON to attach to the Lambda Function role | `string` | `null` | no |
 | lambda\_role\_permissions\_boundary | ARN of IAM policy that scopes aws\_iam\_role access for the lambda | `string` | `null` | no |
-| lambda\_runtime | Lambda Function runtime | `string` | `"nodejs14.x"` | no |
-| lambda\_timeout | Max amount of time a Lambda Function has to return a response in seconds. Should not be more than 30 (Limited by API Gateway). | `number` | `10` | no |
-| next\_tf\_dir | Relative path to the .next-tf dir. | `string` | `"./.next-tf"` | no |
+| multiple\_deployments\_base\_domain | Default wildcard domain where new deployments should be available. Should be in the form of *.example.com. | `string` | `null` | no |
 | tags | Tag metadata to label AWS resources that support tags. | `map(string)` | `{}` | no |
-| use\_awscli\_for\_static\_upload | Use AWS CLI when uploading static resources to S3 instead of default Bash script. Some cases may fail with 403 Forbidden when using the Bash script. | `bool` | `false` | no |
+| tags\_s3\_bucket | Tag metadata to label AWS S3 buckets. Overrides tags with the same name in input variable tags. | `map(string)` | `{}` | no |
 | vpc\_security\_group\_ids | The list of Security Group IDs to be used by the Lambda functions. lambda\_attach\_to\_vpc should be set to true for these to be applied. | `list(string)` | `[]` | no |
 | vpc\_subnet\_ids | The list of VPC subnet IDs to attach the Lambda functions. lambda\_attach\_to\_vpc should be set to true for these to be applied. | `list(string)` | `[]` | no |
 
@@ -242,6 +245,8 @@ You can create a `.terraformignore` in the root of your project and add the foll
 
 | Name | Description |
 |------|-------------|
+| api\_endpoint | API endpoint that is used by the CLI. |
+| api\_endpoint\_access\_policy\_arn | ARN of the policy that grants access to the API endpoint. |
 | cloudfront\_custom\_error\_response | Preconfigured custom error response the CloudFront distribution should use. |
 | cloudfront\_default\_cache\_behavior | Preconfigured default cache behavior the CloudFront distribution should use. |
 | cloudfront\_default\_root\_object | Preconfigured root object the CloudFront distribution should use. |
@@ -249,7 +254,7 @@ You can create a `.terraformignore` in the root of your project and add the foll
 | cloudfront\_hosted\_zone\_id | Zone id of the main CloudFront distribution (When created). |
 | cloudfront\_ordered\_cache\_behaviors | Preconfigured ordered cache behaviors the CloudFront distribution should use. |
 | cloudfront\_origins | Preconfigured origins the CloudFront distribution should use. |
-| static\_upload\_bucket\_id | n/a |
+| upload\_bucket\_id | n/a |
 
 <!--- END_TF_DOCS --->
 <!-- prettier-ignore-end -->
@@ -269,7 +274,7 @@ So issues that exist on Vercel are likely to occur on this project too.
   After running the initial `terraform destroy` command (that failed) wait ~1 hour and run the command again.
   This time it should run successfully and delete the rest of the stack.
 
-- Initial apply fails with error message `Error: error creating Lambda Event Source Mapping` ([#138](https://github.com/dealmore/terraform-aws-next-js/issues/138))
+- Initial apply fails with error message `Error: error creating Lambda Event Source Mapping` ([#138](https://github.com/milliHQ/terraform-aws-next-js/issues/138))
 
   There is some race condition when the permissions are created for the static deployment Lambda.
   This should only happen on the first deployment.
@@ -277,6 +282,18 @@ So issues that exist on Vercel are likely to occur on this project too.
   **Workaround:**
 
   You should be able to run`terraform apply` again and the stack creation would progreed without this error.
+
+- [Function decreases account's UnreservedConcurrentExecution below its minimum value](https://github.com/milliHQ/terraform-aws-next-js/tree/main/docs/known-issues/0001_reserved-concurrent-executions.md)
+
+## Contributing
+
+Contributions are welcome!  
+If you want to improve this module, please take a look at our [contributing guidelines](https://github.com/milliHQ/terraform-aws-next-js/tree/main/CONTRIBUTING.md) to get started.
+
+## About
+
+This project is maintained by [milliVolt infrastructure](https://milli.is).  
+We build custom infrastructure solutions for any cloud provider.
 
 ## License
 

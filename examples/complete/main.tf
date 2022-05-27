@@ -2,7 +2,7 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 3.0"
+      version = "~> 4.0"
     }
   }
 }
@@ -21,9 +21,9 @@ provider "aws" {
 }
 
 module "tf_next" {
-  source = "dealmore/next-js/aws"
+  source = "milliHQ/next-js/aws"
 
-  deployment_name = "terraform-next-js-example-complete"
+  deployment_name = "tf-next-example-complete"
 
   providers = {
     aws.global_region = aws.global_region
